@@ -10,7 +10,6 @@
 #include "backends/imgui_impl_sdlrenderer2.h"
 
 #include <algorithm>
-#include <array>
 #include <cstdio>
 
 namespace {
@@ -28,7 +27,7 @@ int main(int argc, char** argv) {
     }
 
     SDL_Window* window = SDL_CreateWindow(
-        "Rhythm Offset Calibrator",
+        "리듬 오프셋 캘리브레이터",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         kWindowWidth,
@@ -66,8 +65,10 @@ int main(int argc, char** argv) {
     rhythm.setBpm(120.0);
     const bool audioReady = audio.initialize();
 
-    BeatSound selectedSound = BeatSound::Tick;
     long long lastTriggeredBeat = -1;
+    float judgementOffsetMs = 0.0f;
+    float kickVolume = 0.95f;
+    float hiHatVolume = 0.28f;
     bool running = false;
     bool quit = false;
 
@@ -86,7 +87,10 @@ int main(int argc, char** argv) {
                 }
 
                 if (event.key.keysym.sym == SDLK_SPACE && running) {
-                    stats.addSample(rhythm.timingErrorMs(timer.elapsedMs()));
+                    const double hitElapsedMs = timer.elapsedMs();
+                    const double adjustedHitMs = hitElapsedMs - static_cast<double>(judgementOffsetMs);
+                    stats.addSample(rhythm.clapTimingErrorMs(adjustedHitMs));
+                    renderer.addHitMark(rhythm.centeredClapPhase(adjustedHitMs));
                 }
             }
         }
@@ -96,7 +100,13 @@ int main(int argc, char** argv) {
 
         if (running && audioReady && beatIndex > lastTriggeredBeat) {
             for (long long index = lastTriggeredBeat + 1; index <= beatIndex; ++index) {
-                audio.trigger(selectedSound);
+                audio.trigger(BeatSound::HiHat, hiHatVolume);
+
+                if (index % 4 == 3) {
+                    audio.trigger(BeatSound::Clap, 0.95f);
+                } else {
+                    audio.trigger(BeatSound::Kick, kickVolume);
+                }
             }
             lastTriggeredBeat = beatIndex;
         }
@@ -107,11 +117,21 @@ int main(int argc, char** argv) {
 
         ImGui::SetNextWindowPos(ImVec2(24.0f, 24.0f), ImGuiCond_Once);
         ImGui::SetNextWindowSize(ImVec2(1072.0f, 700.0f), ImGuiCond_Once);
-        ImGui::Begin("Rhythm Offset Calibrator", nullptr, ImGuiWindowFlags_NoCollapse);
+        ImGui::Begin("리듬 오프셋 캘리브레이터", nullptr, ImGuiWindowFlags_NoCollapse);
 
+        const double adjustedElapsedMs = elapsedMs - static_cast<double>(judgementOffsetMs);
+        const double phase = running ? rhythm.centeredClapPhase(adjustedElapsedMs) : -0.5;
+
+        ImGui::BeginChild("MainLane", ImVec2(0.0f, 360.0f), true);
+        renderer.drawCalibrationLane(phase, stats.latest(), 320.0f);
+        ImGui::TextWrapped("클랩 박자에만 맞춰 Space를 누르세요. 움직이는 선이 중앙 판정선에 닿을 때 입력하면 됩니다.");
+        ImGui::EndChild();
+
+        ImGui::Spacing();
         ImGui::Columns(2, nullptr, true);
 
-        ImGui::TextUnformatted("Transport");
+        ImGui::BeginChild("Controls", ImVec2(0.0f, 0.0f), false);
+        ImGui::TextUnformatted("재생 설정");
         float bpm = static_cast<float>(rhythm.bpm());
         if (ImGui::SliderFloat("BPM", &bpm, 40.0f, 300.0f, "%.0f")) {
             rhythm.setBpm(static_cast<double>(bpm));
@@ -119,33 +139,15 @@ int main(int argc, char** argv) {
                 timer.reset();
                 timer.start();
                 lastTriggeredBeat = -1;
+                renderer.resetHitMarks();
             }
         }
 
-        ImGui::Text("Beat interval: %.2f ms", rhythm.beatIntervalMs());
+        ImGui::SliderFloat("판정선 오프셋 (ms)", &judgementOffsetMs, -180.0f, 180.0f, "%.0f ms");
+        ImGui::SliderFloat("킥 볼륨", &kickVolume, 0.0f, 1.5f, "%.2f");
+        ImGui::SliderFloat("하이햇 볼륨", &hiHatVolume, 0.0f, 1.0f, "%.2f");
 
-        static const std::array<BeatSound, 5> soundOptions {
-            BeatSound::Kick,
-            BeatSound::Snare,
-            BeatSound::Clap,
-            BeatSound::HiHat,
-            BeatSound::Tick
-        };
-
-        if (ImGui::BeginCombo("Beat sound", toString(selectedSound))) {
-            for (int i = 0; i < static_cast<int>(soundOptions.size()); ++i) {
-                const bool isSelected = soundOptions[i] == selectedSound;
-                if (ImGui::Selectable(toString(soundOptions[i]), isSelected)) {
-                    selectedSound = soundOptions[i];
-                }
-                if (isSelected) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-            ImGui::EndCombo();
-        }
-
-        if (ImGui::Button(running ? "Stop" : "Start", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button(running ? "정지" : "시작", ImVec2(120.0f, 0.0f))) {
             if (running) {
                 timer.stop();
                 running = false;
@@ -154,26 +156,33 @@ int main(int argc, char** argv) {
                 timer.start();
                 stats.clear();
                 lastTriggeredBeat = -1;
+                renderer.resetHitMarks();
                 running = true;
             }
         }
 
         ImGui::SameLine();
-        if (ImGui::Button("Reset Stats", ImVec2(120.0f, 0.0f))) {
+        if (ImGui::Button("기록 초기화", ImVec2(120.0f, 0.0f))) {
             stats.clear();
+            renderer.resetHitMarks();
         }
 
         ImGui::Spacing();
-        ImGui::TextWrapped("Press Space when the moving marker crosses the center line. Negative is early, positive is late.");
-        ImGui::Text("Elapsed: %.2f ms", elapsedMs);
-        ImGui::Text("Nearest beat: %.2f ms", rhythm.nearestBeatTimeMs(elapsedMs));
-        ImGui::Text("Audio device: %s", audioReady ? "Ready" : "Unavailable");
+        ImGui::Text("비트 간격: %.2f ms", rhythm.beatIntervalMs());
+        ImGui::Text("클랩 간격: %.2f ms", rhythm.clapIntervalMs());
+        ImGui::TextUnformatted("패턴: 킥 / 킥 / 킥 / 클랩 + 하이햇");
+        ImGui::Text("경과 시간: %.2f ms", elapsedMs);
+        ImGui::Text("목표 클랩: %.2f ms", rhythm.nearestClapTimeMs(adjustedElapsedMs) + judgementOffsetMs);
+        ImGui::Text("오디오 장치: %s", audioReady ? "준비됨" : "사용 불가");
+        ImGui::EndChild();
 
         ImGui::NextColumn();
-
-        const double phase = running ? rhythm.centeredPhase(elapsedMs) : -0.5;
-        renderer.drawCalibrationLane(phase, stats.latest());
+        ImGui::BeginChild("Stats", ImVec2(0.0f, 0.0f), false);
+        ImGui::TextUnformatted("통계");
         renderer.drawStats(stats);
+        ImGui::Spacing();
+        ImGui::TextWrapped("오프셋이 양수면 중앙 판정선보다 늦게 치는 편이고, 음수면 더 일찍 치는 편입니다.");
+        ImGui::EndChild();
 
         ImGui::Columns(1);
         ImGui::End();

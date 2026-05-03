@@ -21,13 +21,14 @@ class AudioEngine {
 public:
     bool initialize();
     void shutdown();
-    void trigger(BeatSound sound);
+    void trigger(BeatSound sound, float gain = 1.0f);
     [[nodiscard]] bool initialized() const { return m_initialized; }
 
 private:
     struct Voice {
         BeatSound sound {BeatSound::Tick};
         double ageSeconds {0.0};
+        float gain {1.0f};
         bool active {false};
         uint32_t noiseState {0x12345678u};
     };

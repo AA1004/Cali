@@ -69,20 +69,21 @@ void AudioEngine::shutdown() {
     m_initialized = false;
 }
 
-void AudioEngine::trigger(BeatSound sound) {
+void AudioEngine::trigger(BeatSound sound, float gain) {
     std::scoped_lock lock(m_mutex);
 
     for (auto& voice : m_voices) {
         if (!voice.active) {
             voice.sound = sound;
             voice.ageSeconds = 0.0;
+            voice.gain = gain;
             voice.active = true;
             voice.noiseState = voice.noiseState * 1664525u + 1013904223u;
             return;
         }
     }
 
-    m_voices.front() = Voice {sound, 0.0, true, 0xCAFEBABEu};
+    m_voices.front() = Voice {sound, 0.0, gain, true, 0xCAFEBABEu};
 }
 
 void AudioEngine::dataCallback(ma_device* device, void* output, const void* input, ma_uint32 frameCount) {
@@ -117,15 +118,19 @@ float AudioEngine::sampleVoice(Voice& voice, float dt) {
 
     switch (voice.sound) {
     case BeatSound::Kick: {
-        const double env = std::exp(-t * 10.0);
-        const double freq = 120.0 - t * 70.0;
-        sample = static_cast<float>(std::sin(2.0 * kPi * freq * t) * env * 0.9);
-        finished = t > 0.35;
+        const double pitchDrop = 88.0 * std::exp(-t * 34.0);
+        const double bodyFreq = 52.0 + pitchDrop;
+        const double bodyEnv = std::exp(-t * 24.0);
+        const double clickEnv = std::exp(-t * 120.0);
+        const double body = std::sin(2.0 * kPi * bodyFreq * t) * bodyEnv * 1.05;
+        const double click = nextNoise(voice) * clickEnv * 0.16;
+        sample = static_cast<float>((body + click) * voice.gain);
+        finished = t > 0.16;
         break;
     }
     case BeatSound::Snare: {
         const double env = std::exp(-t * 18.0);
-        sample = nextNoise(voice) * static_cast<float>(env * 0.75);
+        sample = nextNoise(voice) * static_cast<float>(env * 0.75) * voice.gain;
         finished = t > 0.22;
         break;
     }
@@ -133,19 +138,19 @@ float AudioEngine::sampleVoice(Voice& voice, float dt) {
         const double env1 = std::exp(-(std::max)(0.0, t - 0.00) * 30.0);
         const double env2 = std::exp(-(std::max)(0.0, t - 0.02) * 35.0);
         const double env3 = std::exp(-(std::max)(0.0, t - 0.04) * 40.0);
-        sample = nextNoise(voice) * static_cast<float>((env1 + env2 + env3) * 0.25);
+        sample = nextNoise(voice) * static_cast<float>((env1 + env2 + env3) * 0.25f * voice.gain);
         finished = t > 0.18;
         break;
     }
     case BeatSound::HiHat: {
         const double env = std::exp(-t * 45.0);
-        sample = nextNoise(voice) * static_cast<float>(env * 0.4);
+        sample = nextNoise(voice) * static_cast<float>(env * 0.4f * voice.gain);
         finished = t > 0.10;
         break;
     }
     case BeatSound::Tick: {
         const double env = std::exp(-t * 55.0);
-        sample = static_cast<float>(std::sin(2.0 * kPi * 1800.0 * t) * env * 0.35);
+        sample = static_cast<float>(std::sin(2.0 * kPi * 1800.0 * t) * env * 0.35 * voice.gain);
         finished = t > 0.08;
         break;
     }
