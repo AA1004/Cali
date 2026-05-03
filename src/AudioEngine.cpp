@@ -130,9 +130,9 @@ float AudioEngine::sampleVoice(Voice& voice, float dt) {
         break;
     }
     case BeatSound::Clap: {
-        const double env1 = std::exp(-std::max(0.0, t - 0.00) * 30.0);
-        const double env2 = std::exp(-std::max(0.0, t - 0.02) * 35.0);
-        const double env3 = std::exp(-std::max(0.0, t - 0.04) * 40.0);
+        const double env1 = std::exp(-(std::max)(0.0, t - 0.00) * 30.0);
+        const double env2 = std::exp(-(std::max)(0.0, t - 0.02) * 35.0);
+        const double env3 = std::exp(-(std::max)(0.0, t - 0.04) * 40.0);
         sample = nextNoise(voice) * static_cast<float>((env1 + env2 + env3) * 0.25);
         finished = t > 0.18;
         break;

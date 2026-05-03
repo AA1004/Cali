@@ -112,9 +112,9 @@ int main(int argc, char** argv) {
         ImGui::Columns(2, nullptr, true);
 
         ImGui::TextUnformatted("Transport");
-        double bpm = rhythm.bpm();
-        if (ImGui::SliderDouble("BPM", &bpm, 40.0, 300.0, "%.0f")) {
-            rhythm.setBpm(bpm);
+        float bpm = static_cast<float>(rhythm.bpm());
+        if (ImGui::SliderFloat("BPM", &bpm, 40.0f, 300.0f, "%.0f")) {
+            rhythm.setBpm(static_cast<double>(bpm));
             if (running) {
                 timer.reset();
                 timer.start();
